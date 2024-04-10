@@ -1,9 +1,16 @@
-import click
-from PIL import Image
-import torch
+import os
 import copy
 from pathlib import Path
-import os
+from typing import List, Optional
+
+import click
+import torch
+import tqdm
+
+from dataclasses import dataclass, field
+from jinja2 import Environment, FileSystemLoader, select_autoescape
+from PIL import Image
+
 from surya.detection import batch_text_detection
 from surya.layout import batch_layout_detection
 from surya.model.detection import segformer
@@ -13,12 +20,8 @@ from surya.model.detection.segformer import load_model as seg_load_model, load_p
 from surya.input.processing import open_pdf, get_page_images, slice_polys_from_image
 from surya.postprocessing.text import sort_text_lines
 from surya.recognition import batch_recognition
-
 from surya.settings import settings
 from surya.schema import TextLine, OCRResult, PolygonBox
-from typing import List, Optional
-from dataclasses import dataclass, field
-from jinja2 import Environment, FileSystemLoader, select_autoescape
 
 _env = Environment(
     loader=FileSystemLoader("templates"),
@@ -231,8 +234,7 @@ def run(source, destination, format, langs: List[str]):
 
     os.makedirs(destination, exist_ok=True)
 
-    for idx, (img, page, src) in enumerate(zip(images, results, source)):
-        print(src)
+    for idx, (img, page, src) in tqdm.tqdm(enumerate(zip(images, results, source)), desc="Exporting results", total=len(source)):
         base = f"{destination}/{Path(src).stem}-{idx:04}"
         if img.mode in ('RGBA', 'LA') or (img.mode == 'P' and 'transparency' in img.info):
             img = img.convert("RGB")

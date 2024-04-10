@@ -225,14 +225,15 @@ def run(source, destination, format, langs: List[str]):
 
         images = get_page_images(doc, page_indices)
         doc.close()
-        source = [source] * len(images)
+        source = list(source) * len(images)
 
     results = on_image(images, [langs] * len(images))
 
     os.makedirs(destination, exist_ok=True)
 
-    for idx, (img, page, source) in enumerate(zip(images, results, source)):
-        base = f"{destination}/{Path(source).stem}-{idx:04}"
+    for idx, (img, page, src) in enumerate(zip(images, results, source)):
+        print(src)
+        base = f"{destination}/{Path(src).stem}-{idx:04}"
         if img.mode in ('RGBA', 'LA') or (img.mode == 'P' and 'transparency' in img.info):
             img = img.convert("RGB")
         img.save(f"{base}.jpg")

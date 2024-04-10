@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<alto xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+      xmlns="http://www.loc.gov/standards/alto/ns-v4#"
+      xsi:schemaLocation="http://www.loc.gov/standards/alto/ns-v4# http://www.loc.gov/standards/alto/v4/alto-4-2.xsd">
+  <Description>
+    <MeasurementUnit>pixel</MeasurementUnit>
+    <sourceImageInformation>
+      <fileName>{{filename}}</fileName>
+    </sourceImageInformation>
+  </Description>
+
+  <Tags>
+      {%- for label in labels -%}
+        <OtherTag ID="{{label}}" LABEL="{{label}}" DESCRIPTION="block type {{label}}"/>
+      {%- endfor -%}
+  </Tags>
+
+  <Layout>
+    <Page WIDTH="{{page.width}}" HEIGHT="{{page.height}}" PHYSICAL_IMG_NR="0">
+      <PrintSpace HPOS="0" VPOS="0" WIDTH="{{page.width}}" HEIGHT="{{page.height}}">
+        {% for region in regions %}
+        <TextBlock{% if region.width %} HPOS="{{region.h}}" VPOS="{{region.v}}" WIDTH="{{region.width}}" HEIGHT="{{region.height}}" TAGREFS="{{region.name}}" {% endif %} ID="reg_{{region.idx}}">
+          {% if region.width %} <Shape><Polygon POINTS="{{region.points}}"/></Shape>{% endif %}
+          {%for line in region.lines %}
+          <TextLine BASELINE="{{line.baseline}}" HPOS="{{line.h}}" VPOS="{{line.v}}" WIDTH="{{line.width}}" HEIGHT="{{line.height}}">
+            <Shape><Polygon POINTS="{{line.points}}"/></Shape>
+      	    <String CONTENT="{{line.content}}" WC="{{line.confidence}}"></String>
+          </TextLine>
+          {% endfor %}
+        </TextBlock>
+        {% endfor %}
+      </PrintSpace>
+    </Page>
+  </Layout>
+</alto>

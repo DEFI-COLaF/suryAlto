@@ -177,9 +177,9 @@ def on_image(images: List[Image.Image], langs: List[List[str]]) -> List[KrakenPa
 
     # Do layout predictions
     layout_predictions = batch_layout_detection(images, lay_model, lay_processor, copy.deepcopy(line_predictions))
-    # from collections import namedtuple
-    # x = namedtuple("x", ["bboxes"])
-    # layout_predictions = [x("")] * len(images)
+
+    if lay_model.device == "cuda":
+        torch.cuda.empty_cache()  # Empty cache from first model run
 
     # And now we need to merge predictions within layout :)
     out = []

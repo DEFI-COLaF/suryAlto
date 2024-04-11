@@ -1,7 +1,7 @@
 suryALTO
 ========
 
-A simple script to produce ALTO data based on Surya OCR
+A simple script to produce ALTO data based on [Surya OCR](https://github.com/VikParuchuri/surya)
 
 ## Install
 

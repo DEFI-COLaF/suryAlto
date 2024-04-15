@@ -156,58 +156,81 @@ def _custom_ocr(images, det_predictions, langs, rec_model, rec_processor) -> Lis
     return predictions_by_image
 
 
-def on_image(images: List[Image.Image], langs: List[List[str]]) -> List[KrakenPage]:
+def chunks(lst, n):
+    """Yield successive n-sized chunks from lst."""
+    for i in range(0, len(lst), n):
+        yield lst[i:i + n]
+
+
+def on_image(
+        images: List[Image.Image],
+        langs: List[List[str]],
+        text: bool = False,
+        batch_size: int = 8
+) -> List[KrakenPage]:
     # Load models
     det_processor, det_model = segformer.load_processor(), segformer.load_model()
     rec_model, rec_processor = load_model(), load_processor()
     lay_model = seg_load_model(checkpoint=settings.LAYOUT_MODEL_CHECKPOINT)
     lay_processor = seg_load_processor(checkpoint=settings.LAYOUT_MODEL_CHECKPOINT)
 
-    # Do line detections
-    line_predictions = batch_text_detection(images, det_model, det_processor)
+    for image_group in chunks(images, batch_size):
+        # Do line detections
+        line_predictions = batch_text_detection(image_group, det_model, det_processor)
 
-    if det_model.device == "cuda":
-        torch.cuda.empty_cache()  # Empty cache from first model run
+        if det_model.device == "cuda":
+            torch.cuda.empty_cache()  # Empty cache from first model run
 
-    # Do OCR
-    predictions = _custom_ocr(
-        images,
-        det_predictions=line_predictions, langs=langs, rec_model=rec_model, rec_processor=rec_processor
-    )
+        if text:
+            predictions = _custom_ocr(
+                image_group,
+                det_predictions=line_predictions, langs=langs, rec_model=rec_model, rec_processor=rec_processor
+            )
+        else:
+            predictions = line_predictions
 
-    # Do layout predictions
-    layout_predictions = batch_layout_detection(images, lay_model, lay_processor, copy.deepcopy(line_predictions))
+        # Do layout predictions
+        layout_predictions = batch_layout_detection(
+            image_group,
+            lay_model,
+            lay_processor,
+            copy.deepcopy(line_predictions)
+        )
 
-    if lay_model.device == "cuda":
-        torch.cuda.empty_cache()  # Empty cache from first model run
+        if rec_model.device == "cuda":
+            torch.cuda.empty_cache()  # Empty cache from first model run
 
-    # And now we need to merge predictions within layout :)
-    out = []
-    for lay_pred, text_pred, image in zip(layout_predictions, predictions, images):
-        page = KrakenPage(width=image.width, height=image.height)
-        unused_lines = [
-            KrakenLine(line.text, _obj=line, confidence=line.confidence)
-            for line in text_pred.text_lines
-            if line.text.strip()
-        ]
-        used_line = set()
-        for idx, region in enumerate(lay_pred.bboxes):
-            kreg = KrakenRegion(name=region.label, _obj=region, idx=idx)
-            for line in unused_lines:
-                if line not in used_line and line._obj.intersection_pct(region) >= .8:
-                    kreg.lines.append(line)
-                    used_line.add(line)
-            if kreg.lines:
-                page.regions.append(kreg)
-        # Deal with undispatched
+        # And now we need to merge predictions within layout :)
+        for lay_pred, line_pred, image in zip(layout_predictions, predictions, image_group):
+            print(len(image_group))
+            page = KrakenPage(width=image.width, height=image.height)
+            if text:
+                unused_lines = [
+                    KrakenLine(line.text, _obj=line, confidence=line.confidence)
+                    for line in line_pred.text_lines
+                    if line.text.strip()
+                ]
+            else:
+                unused_lines = [
+                    KrakenLine("", _obj=line, confidence=0)
+                    for line in line_pred.bboxes
+                ]
+            used_line = set()
+            for idx, region in enumerate(sorted(lay_pred.bboxes, key=lambda b: (b.bbox[0], b.bbox[1]))):
+                kreg = KrakenRegion(name=region.label, _obj=region, idx=idx)
+                for line in unused_lines:
+                    if line not in used_line and line._obj.intersection_pct(region) >= .8:
+                        kreg.lines.append(line)
+                        used_line.add(line)
+                if kreg.lines:
+                    page.regions.append(kreg)
+            # Deal with undispatched
 
-        unused_lines = [line for line in unused_lines if line not in used_line]
-        if unused_lines:
-            page.regions.append(KrakenRegion("empty", _obj=None, lines=unused_lines, idx=-1))
+            unused_lines = [line for line in unused_lines if line not in used_line]
+            if unused_lines:
+                page.regions.append(KrakenRegion("empty", _obj=None, lines=unused_lines, idx=-1))
 
-        out.append(page)
-
-    return out
+            yield page
 
 
 @click.command("run")
@@ -216,7 +239,9 @@ def on_image(images: List[Image.Image], langs: List[List[str]]) -> List[KrakenPa
               default="ocr-output")
 @click.option("-f", "--format", default="image", type=click.Choice(["image", "pdf"]))
 @click.option("-l", "--langs", default=("en", ), help="Lang that needs to be recognized", multiple=True)
-def run(source, destination, format, langs: List[str]):
+@click.option("-b", "--batch", default=8, type=int, help="Lang that needs to be recognized")
+@click.option("--text/--no-text", default=True, help="Recognized / does not recognize text")
+def run(source, destination, format, langs: List[str], batch: int, text: bool):
     if format == "image":
         images = [Image.open(img) for img in source]
     else:
@@ -230,11 +255,13 @@ def run(source, destination, format, langs: List[str]):
         doc.close()
         source = list(source) * len(images)
 
-    results = on_image(images, [langs] * len(images))
-
     os.makedirs(destination, exist_ok=True)
 
-    for idx, (img, page, src) in tqdm.tqdm(enumerate(zip(images, results, source)), desc="Exporting results", total=len(source)):
+    for idx, (img, page, src) in tqdm.tqdm(
+            enumerate(zip(images, on_image(images, [langs] * len(images), batch_size=batch, text=text), source)),
+            desc="Exporting results",
+            total=len(source)
+    ):
         base = f"{destination}/{Path(src).stem}-{idx:04}"
         if img.mode in ('RGBA', 'LA') or (img.mode == 'P' and 'transparency' in img.info):
             img = img.convert("RGB")
